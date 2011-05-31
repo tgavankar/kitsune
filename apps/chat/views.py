@@ -19,7 +19,8 @@ def chat(request):
     nonce = None
     if request.user.is_authenticated():
         nonce = make_nonce()
-        cache.set('chatnonce:{n}'.format(n=nonce), request.user, 5 * 60)
+        redis_client('chat').setex('chatnonce:{n}'.format(n=nonce), 
+                                   request.user.username, 5 * 60)
     return jingo.render(request, 'chat/chat.html', {'nonce': nonce})
 
 
@@ -43,6 +44,17 @@ def make_nonce():
     return ''.join(random.choice('abcdefghijklmnopqrstuvwxyz234567')
                    for _ in xrange(10))
 
+def set_sid_to_nick(nonce, sid):
+    user_nick = redis_client('chat').get('chatnonce:{n}'.format(n=nonce))
+    if user_nick is not None:
+        redis_client('chat').set('chatsid:{n}'.format(n=sid), user_nick)
+
+def get_nick_from_chatsid(sid):
+    nick = redis_client('chat').get('chatsid:{n}'.format(n=sid))
+    if nick is not None:
+        return nick
+    else:
+        return sid
 
 def chat_socketio(io):
     CHANNEL = 'world'
@@ -75,10 +87,25 @@ def chat_socketio(io):
         message = io.recv()
         if message:  # Always a list of 0 or 1 strings, I deduce from the source code
             to_redis = message[0]
-            print 'Outgoing: %s' % to_redis
-            redis_client('chat').publish(CHANNEL, to_redis)
+            # On the chance that a user disconnects (loss of internet) and socketio
+            # autoreconnects, a new session_id is given. However, the nonce is still
+            # the same since the page hasn't been reloaded. There's a slim case where
+            # getting the username via nonce fails (expired), so the username defaults
+            # to the session ID, at the moment.
+            # TODO: In the above case, XHR request a new nonce and update?
+            # TODO: Replace flat strings with JSON objects (etc). 
+            if to_redis[0:7] == 'Joined:': # Runs on reconnect
+                set_sid_to_nick(to_redis[7:], io.session.session_id)
+                redis_client('chat').publish(CHANNEL, get_nick_from_chatsid(io.session.session_id) + ' has joined')
+            else:
+                print 'Outgoing: %s' % to_redis
+                redis_client('chat').publish(CHANNEL, get_nick_from_chatsid(io.session.session_id) + ': ' + to_redis)
 
+    redis_client('chat').publish(CHANNEL, get_nick_from_chatsid(io.session.session_id) + ' has disconnected')
     print "EXIT %s" % io.session
+
+    # Cleanup cache
+    redis_client('chat').delete(io.session.session_id)
 
     # Each time I close the 2nd chat window, wait for the old socketio() view
     # to exit, and then reopen the chat page, the number of Incomings increases

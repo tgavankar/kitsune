@@ -9,14 +9,18 @@
         s.connect();
 
         s.addEvent('connect', function() {
-            //s.send('New participant joined');
+            s.send('Joined:' + $("#chatform input[name=nonce]").val());
+        });
+        
+        s.addEvent('reconnect', function() {
+            s.send('Joined:' + $("#chatform input[name=nonce]").val());
         });
 
         s.addEvent('message', function(data) {
             var $chatbox = $("#chatbox");
             $chatbox.append("<div>" + data + "</div>").scrollTop($chatbox[0].scrollHeight);
         });
-
+        
         //send the message when submit is clicked
         $('#chatform').submit(function (evt) {
             var line = $('#chatform [type=text]').val();
