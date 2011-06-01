@@ -48,6 +48,9 @@ def set_sid_to_nick(nonce, sid):
     user_nick = redis_client('chat').get('chatnonce:{n}'.format(n=nonce))
     if user_nick is not None:
         redis_client('chat').set('chatsid:{n}'.format(n=sid), user_nick)
+        return True
+    else:
+        return False
 
 def get_nick_from_chatsid(sid):
     nick = redis_client('chat').get('chatsid:{n}'.format(n=sid))
@@ -95,13 +98,14 @@ def chat_socketio(io):
             # TODO: In the above case, XHR request a new nonce and update?
             # TODO: Replace flat strings with JSON objects (etc). 
             if to_redis[0:7] == 'Joined:': # Runs on reconnect
-                set_sid_to_nick(to_redis[7:], io.session.session_id)
+                if set_sid_to_nick(to_redis[7:], io.session.session_id) is False:
+                    io.send('You have been disconnected for inactivity. Please refresh the page.')
+                    break
                 redis_client('chat').publish(CHANNEL, get_nick_from_chatsid(io.session.session_id) + ' has joined')
             else:
                 print 'Outgoing: %s' % to_redis
                 redis_client('chat').publish(CHANNEL, get_nick_from_chatsid(io.session.session_id) + ': ' + to_redis)
 
-    redis_client('chat').publish(CHANNEL, get_nick_from_chatsid(io.session.session_id) + ' has disconnected')
     print "EXIT %s" % io.session
 
     # Cleanup cache
@@ -111,5 +115,7 @@ def chat_socketio(io):
     # to exit, and then reopen the chat page, the number of Incomings increases
     # by one. The subscribers are never exiting. This fixes that behavior:
     in_greenlet.kill()
+
+    redis_client('chat').publish(CHANNEL, get_nick_from_chatsid(io.session.session_id) + ' has disconnected')
 
     return HttpResponse()
