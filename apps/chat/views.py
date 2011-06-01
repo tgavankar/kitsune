@@ -20,7 +20,7 @@ def chat(request):
     if request.user.is_authenticated():
         nonce = make_nonce()
         redis_client('chat').setex('chatnonce:{n}'.format(n=nonce), 
-                                   request.user.username, 5 * 60)
+                                   request.user.username, 60)
     return jingo.render(request, 'chat/chat.html', {'nonce': nonce})
 
 
@@ -44,7 +44,7 @@ def make_nonce():
     return ''.join(random.choice('abcdefghijklmnopqrstuvwxyz234567')
                    for _ in xrange(10))
 
-def set_sid_to_nick(nonce, sid):
+def map_sid_to_nick(nonce, sid):
     user_nick = redis_client('chat').get('chatnonce:{n}'.format(n=nonce))
     if user_nick is not None:
         redis_client('chat').set('chatsid:{n}'.format(n=sid), user_nick)
@@ -52,12 +52,9 @@ def set_sid_to_nick(nonce, sid):
     else:
         return False
 
-def get_nick_from_chatsid(sid):
+def nick_from_chat_sid(sid):
     nick = redis_client('chat').get('chatsid:{n}'.format(n=sid))
-    if nick is not None:
-        return nick
-    else:
-        return sid
+    return nick or sid
 
 def chat_socketio(io):
     CHANNEL = 'world'
@@ -97,18 +94,18 @@ def chat_socketio(io):
             # to the session ID, at the moment.
             # TODO: In the above case, XHR request a new nonce and update?
             # TODO: Replace flat strings with JSON objects (etc). 
-            if to_redis[0:7] == 'Joined:': # Runs on reconnect
-                if set_sid_to_nick(to_redis[7:], io.session.session_id) is False:
+            if to_redis[0:7] == 'Joined:':  # Runs on reconnect
+                if map_sid_to_nick(to_redis[7:], io.session.session_id) is False:
                     io.send('You have been disconnected for inactivity. Please refresh the page.')
                     break
-                redis_client('chat').publish(CHANNEL, get_nick_from_chatsid(io.session.session_id) + ' has joined')
+                redis_client('chat').publish(CHANNEL, nick_from_chat_sid(io.session.session_id) + ' has joined')
             else:
                 print 'Outgoing: %s' % to_redis
-                redis_client('chat').publish(CHANNEL, get_nick_from_chatsid(io.session.session_id) + ': ' + to_redis)
+                redis_client('chat').publish(CHANNEL, nick_from_chat_sid(io.session.session_id) + ': ' + to_redis)
 
     print "EXIT %s" % io.session
 
-    # Cleanup cache
+    # Clean up cache.
     redis_client('chat').delete(io.session.session_id)
 
     # Each time I close the 2nd chat window, wait for the old socketio() view
@@ -116,6 +113,6 @@ def chat_socketio(io):
     # by one. The subscribers are never exiting. This fixes that behavior:
     in_greenlet.kill()
 
-    redis_client('chat').publish(CHANNEL, get_nick_from_chatsid(io.session.session_id) + ' has disconnected')
+    redis_client('chat').publish(CHANNEL, nick_from_chat_sid(io.session.session_id) + ' has disconnected')
 
     return HttpResponse()
