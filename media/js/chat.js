@@ -1,5 +1,7 @@
 (function() {
     $(document).ready(function() {
+        var room_name = $("#chatform input[name=room]").val();
+
         var s = new io.Socket(window.location.hostname, {
           port: 3000,
           rememberTransport: false,
@@ -9,11 +11,11 @@
         s.connect();
 
         s.addEvent('connect', function() {
-            s.send('Joined:' + $("#chatform input[name=nonce]").val());
+            s.send(JSON.stringify({'type': 'joined', 'room': room_name, 'payload': $("#chatform input[name=nonce]").val()}));
         });
         
         s.addEvent('reconnect', function() {
-            s.send('Joined:' + $("#chatform input[name=nonce]").val());
+            s.send(JSON.stringify({'type': 'joined', 'room': room_name, 'payload': $("#chatform input[name=nonce]").val()}));
         });
 
         s.addEvent('message', function(data) {
@@ -26,7 +28,7 @@
             var line = $('#chatform [type=text]').val();
             if (line !== '') {
                 $('#chatform [type=text]').val('');
-                s.send(line);
+                s.send(JSON.stringify({'type': 'message', 'room': room_name, 'payload': line}));
             }
             $(this).trigger('ajaxComplete');
             return false;
